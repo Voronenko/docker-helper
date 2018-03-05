@@ -1,82 +1,58 @@
-python = python2.7
 SHELL=/bin/bash
 
-CODE_SERVICES= SERVICE1 SERVICE2
+REVISION_FILE := $(PWD)/version.txt
+HELPER := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))/deployment/make_helper.sh $(REVISION_FILE)
 
-# path to revision file in format latest=x.y.z , other properties ignored
-REVISION_FILE := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))/version.txt
-HELPER := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))/docker_helper.sh $(REVISION_FILE)
+VERSION=$(shell source $(HELPER) ; resolveLatest)
+TAG=$(shell source $(HELPER); resolveVersionTag)
 
-# built images by ansible container will be ROLENAME-servicename
-ROLE_NAME=SPECIFY
-
-# version as per version.txt
-ROLE_VERSION=$(shell source $(HELPER) ; resolveLatest)
-
-# version as per detection, kind of auth:0.0.1-da955a4-raw
 CURRENT_IMAGE_VERSION := $(shell source $(HELPER) ; getVersion)
 
-EFFECTIVE_IMAGE_VERSION := $(ROLE_VERSION)
+@NODE_PRESENT := $(shell type "node"> /dev/null)
 
-REGISTRY_HOST=docker.io
-USERNAME=SPECIFY
+.PHONY: show-version
 
-all: clean_build
+docker-client-build:
+	cd client && $(MAKE) build
 
-clean_build: clean initialize build
+docker-api-build:
+	cd api && $(MAKE) build
 
-build:  p-env/bin/ansible-container
-	@echo p-env/bin/ansible-container --debug --project-name $(ROLE_NAME) build --roles-path ./roles/ -- -vvv
-	@p-env/bin/ansible-container --debug --project-name $(ROLE_NAME) build --roles-path ./roles/ -- -vvv
-	@echo "Application docker image was build"
 
-run:  p-env/bin/ansible-container
-	@echo p-env/bin/ansible-container --debug --project-name $(ROLE_NAME) run --roles-path ./roles/ -- -vvv
-	@p-env/bin/ansible-container --debug --project-name $(ROLE_NAME) run --roles-path ./roles/ -- -vvv
-	@echo "Application environment was started"
+docker-build: docker-client-build docker-api-build
 
-stop:   p-env/bin/ansible-container
-	@echo p-env/bin/ansible-container --debug --project-name $(ROLE_NAME) stop
-	@p-env/bin/ansible-container --debug --project-name $(ROLE_NAME) stop
-	@echo "Application environment was stopped"
 
-p-env/bin/pip: p-env/bin/python
-	p-env/bin/pip install -r requirements.txt
 
-p-env/bin/python:
-	virtualenv -p $(python) --no-site-packages p-env
-	@touch $@
+docker-client-push:
+	cd client && $(MAKE) push
 
-p-env/bin/ansible-container: p-env/bin/pip
-	@touch $@
+docker-api-push:
+	cd api && $(MAKE) push
 
-clean:
-	@rm -rf .Python p-env roles
 
-initialize:
-	@init_quick.sh
+docker-push: docker-client-push docker-api-push
 
-tag:
-	@$(foreach CODESERVICE,$(CODE_SERVICES), \
-	echo docker tag $(ROLE_NAME)-$(CODESERVICE):latest $(USERNAME)/dockerables:$(CODESERVICE).$(EFFECTIVE_IMAGE_VERSION) ; \
-	docker tag $(ROLE_NAME)-$(CODESERVICE):latest $(USERNAME)/dockerables:$(CODESERVICE).$(EFFECTIVE_IMAGE_VERSION) ; \
-	echo docker tag $(ROLE_NAME)-$(CODESERVICE):latest $(USERNAME)/dockerables:$(CODESERVICE).latest ; \
-	docker tag $(ROLE_NAME)-$(CODESERVICE):latest $(USERNAME)/dockerables:$(CODESERVICE).latest ; \
-	)
+version.txt:
+	@echo "latest=0.0.0" > $(REVISION_FILE)
+	@echo [I]: $(REVISION_FILE) initialized
+	@cat $(REVISION_FILE)
 
-push:
-	@$(foreach CODESERVICE,$(CODE_SERVICES), \
-	echo docker push $(USERNAME)/dockerables:$(CODESERVICE).$(EFFECTIVE_IMAGE_VERSION) ; \
-	docker push $(USERNAME)/dockerables:$(CODESERVICE).$(EFFECTIVE_IMAGE_VERSION) ; \
-	echo docker push $(USERNAME)/dockerables:$(CODESERVICE).latest ; \
-	docker push $(USERNAME)/dockerables:$(CODESERVICE).latest ; \
-	)
+ensure-clean-state:
+	@source $(HELPER) ; ! _hasGitChanges || (echo "[!] NOT READY: repo needs to be clean: git status -s ." >&2 && git status -s . && exit 1) ;
 
-sh-conductor:
-	until [ "`/usr/bin/docker inspect -f {{.State.Running}} $(ROLE_NAME)_conductor`"=="true" ]; do \
-	sleep 0.1; \
-        echo "Waiting for $(ROLE_NAME)..." \
-	done; \
-	docker exec -it $(ROLE_NAME)_conductor /bin/sh
+ensure-tagging-state:	TAG=$(shell source $(HELPER); resolveVersionTag $(VERSION))
+ensure-tagging-state:
+	@echo "Checking for tag $(TAG) existance via test -n \"$(git tag | grep \"^$tag\$\")\""
+	@source $(HELPER) ; tagExists $(TAG) || (echo "[!]: version not tagged in git. make patch-release or make minor-release" >&2 && exit 1) ;
+	@source $(HELPER) ; ! differsFromLatest $(TAG) || (echo "[!]: repo state differs from previous tag $(TAG). make patch-release or make minor-release." ; exit 1)
 
-.PHONY: all clean initialize build run stop
+show-version: version.txt
+	@source $(HELPER); getVersion
+dump-jenkins-facts:
+	@echo VERSION=$(VERSION)>jenkins_facts.txt
+	@echo DOCKER_SUFFIX=$(CURRENT_IMAGE_VERSION)>>jenkins_facts.txt
+
+gitflow-release-start: ensure-clean-state
+	@source $(HELPER) ; gitflow_release_start
+gitflow-release-finish: ensure-clean-state
+	@source $(HELPER) ; gitflow_release_finish
