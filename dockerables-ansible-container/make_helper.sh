@@ -1,3 +1,4 @@
+# https://github.com/Voronenko/docker-helper v1 2018-03
 VERSION_FILE=${1-DockerVersion.txt}
 # =================================================
 # BELOW THIS LINE STARTS UNCHANGABLE PART OF SCRIPT
