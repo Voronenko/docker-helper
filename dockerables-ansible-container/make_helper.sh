@@ -43,7 +43,7 @@ function baseTag() {
 # ===============================
 # returns current project version
 function resolveLatest() {
-	awk -F= '/^latest=/{print $2}' ${VERSION_FILE}
+        awk -F= '/^(latest|major_version)=/{print $2}' ${VERSION_FILE}
 }
 
 # =====================================
