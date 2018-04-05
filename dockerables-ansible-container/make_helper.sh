@@ -122,12 +122,13 @@ function getUpDirLevel2() {
 # ===================================================
 
 function bump_version(){
-  if [ -z "$1" ]
+  NEW_VERSION=$1
+  if [ -z "$NEW_VERSION" ]
   then
     echo "Pass version as param 1"
     return 1
   fi
-	sed -i "s/\(^latest=\).*/\1${1}/" ${VERSION_FILE}
+	sed -i '' -e "s/\(^latest=\).*/\1${NEW_VERSION}/" ${VERSION_FILE}
 }
 
 # =====================================
